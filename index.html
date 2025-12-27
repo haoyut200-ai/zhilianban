@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>Web单词默写表 v22.3 (Spider-Verse 直连版)</title>
+    <script src="https://cdn.sheetjs.com/xlsx-0.19.3/package/dist/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/spark-md5/3.0.2/spark-md5.min.js"></script>
+    
+    <style>
+        :root { 
+            --primary: #ff0055; 
+            --secondary: #00f3ff;
+            --accent: #7000ff;
+            --bg: #050508; 
+            --glass: rgba(15, 15, 25, 0.7); 
+        }
+
+        body { 
+            font-family: 'Segoe UI', sans-serif; 
+            margin: 0; padding: 20px; color: #fff; background-color: var(--bg); 
+            min-height: 100vh; overflow-x: hidden;
+            background-image: radial-gradient(rgba(255, 0, 85, 0.1) 15%, transparent 20%),
+                              radial-gradient(rgba(0, 243, 255, 0.1) 15%, transparent 20%);
+            background-position: 0 0, 10px 10px; background-size: 20px 20px;
+        }
+
+        #bg-canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; pointer-events: none; }
+        .app-container { max-width: 1000px; margin: 0 auto; position: relative; z-index: 1; }
+        
+        .control-panel { 
+            background: var(--glass); padding: 25px; border-radius: 16px; border: 2px solid var(--primary);
+            box-shadow: 10px 10px 0px var(--accent); margin-bottom: 30px; backdrop-filter: blur(10px);
+        }
+
+        h1 {
+            text-align: center; font-size: 2.5em; text-transform: uppercase; letter-spacing: 2px;
+            color: #fff; text-shadow: 3px 3px 0px var(--primary), -3px -3px 0px var(--secondary);
+            margin-bottom: 30px;
+        }
+
+        .api-config { background: rgba(0,0,0,0.5); padding: 15px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #444; display: flex; gap: 10px; flex-wrap: wrap; }
+        .api-label { width: 100%; font-size: 12px; color: var(--secondary); margin-bottom: 5px; font-weight: bold; }
+        .api-input { background: #000; border: 1px solid var(--secondary); color: var(--secondary); padding: 10px; border-radius: 4px; flex: 1; font-family: monospace; }
+        
+        textarea { width: 100%; height: 120px; padding: 12px; background: rgba(0,0,0,0.7); border: 1px solid #555; color: #fff; border-radius: 8px; font-family: 'Courier New', monospace; box-sizing: border-box; }
+        
+        .btn-group { display: flex; gap: 15px; margin-top: 20px; }
+        button { flex: 1; padding: 15px; border: none; border-radius: 4px; font-weight: 900; cursor: pointer; color: white; transition: 0.1s; text-transform: uppercase; clip-path: polygon(5% 0%, 100% 0%, 95% 100%, 0% 100%); }
+        .btn-gen { background: var(--primary); box-shadow: 4px 4px 0px #900; }
+        .btn-excel { background: var(--secondary); color: #000; box-shadow: 4px 4px 0px #008891; }
+        .btn-pdf { background: var(--accent); box-shadow: 4px 4px 0px #440099; }
+        button:active { transform: translate(2px, 2px); box-shadow: none; }
+        button:disabled { background: #333; box-shadow: none; cursor: not-allowed; opacity: 0.5; }
+
+        .progress-bar { height: 6px; background: var(--secondary); width: 0%; transition: width 0.3s; margin-top: 15px; box-shadow: 0 0 10px var(--secondary); }
+
+        .paper-preview { background: white; color: black; width: 210mm; height: 297mm; margin: 0 auto 30px auto; padding: 10mm; box-sizing: border-box; position: relative; box-shadow: 0 0 40px rgba(0,0,0,0.8); page-break-after: always; }
+        .a4-header { text-align: center; font-weight: bold; font-size: 18px; margin-bottom: 5mm; border-bottom: 3px solid #000; padding-bottom: 2mm; }
+        .a4-body { display: flex; justify-content: space-between; height: 270mm; overflow: hidden; }
+        .column { width: 48.5%; }
+        table { width: 100%; border-collapse: collapse; table-layout: fixed; border: 2.5px solid #000; }
+        th, td { border: 1px solid #000; padding: 0 5px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; vertical-align: middle; }
+        
+        /* 列宽分配：批改列加长至 25% */
+        .col-idx { width: 10%; }
+        .col-word { width: 40%; }
+        .col-def { width: 25%; }
+        .col-chk { width: 25%; }
+
+        th { background: #000; color: #fff; height: 8mm; font-size: 11px; }
+        td { height: 8.5mm; font-size: 10.5px; } 
+
+        @media print {
+            body { background: none; }
+            #bg-canvas, .control-panel, h1 { display: none; }
+            #output { position: absolute; left: 0; top: 0; }
+        }
+    </style>
+</head>
+<body>
+    <canvas id="bg-canvas"></canvas>
+    <div class="app-container">
+        <h1>V-Quiz: Across The Spider-Web</h1>
+        <div class="control-panel">
+            <div class="api-config">
+                <div class="api-label">🔑 百度翻译配置 (采用 JSONP 直连技术)</div>
+                <input type="text" id="baiduAppId" class="api-input" placeholder="BAIDU APP ID">
+                <input type="password" id="baiduKey" class="api-input" placeholder="BAIDU SECRET KEY">
+            </div>
+            <div style="margin-bottom:15px; font-weight: bold; color: var(--secondary);">
+                <label style="cursor:pointer;"><input type="checkbox" id="hideMode"> 🕵️ 隐藏单词 (默写模式)</label>
+            </div>
+            <textarea id="wordInput" placeholder="在此输入单词列表，每行一个..."></textarea>
+            <div class="progress-bar" id="progBar"></div>
+            <div id="statusLog" style="text-align:center; font-size:12px; margin-top:10px; color: var(--secondary);">Ready for action...</div>
+            <div class="btn-group">
+                <button class="btn-gen" id="btnGen" onclick="startGeneration()">GO! 查词</button>
+                <button class="btn-excel" id="btnExcel" onclick="exportExcel()" disabled>SAVE EXCEL</button>
+                <button class="btn-pdf" id="btnPdf" onclick="downloadPDF()" disabled>GENERATE PDF</button>
+            </div>
+        </div>
+        <div id="output"></div>
+    </div>
+
+    <script>
+        // --- 粒子系统 ---
+        const canvas = document.getElementById('bg-canvas');
+        const ctx = canvas.getContext('2d');
+        let particles = [];
+        function initCanvas() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+        class Particle {
+            constructor() { this.reset(); }
+            reset() {
+                this.x = Math.random() * canvas.width; this.y = Math.random() * canvas.height;
+                this.size = Math.random() * 15 + 2; this.speedX = (Math.random() - 0.5) * 2;
+                this.speedY = (Math.random() - 0.5) * 2; this.color = Math.random() > 0.5 ? '#ff0055' : '#00f3ff';
+                this.alpha = Math.random() * 0.5; this.glitch = 0;
+            }
+            update() {
+                this.x += this.speedX; this.y += this.speedY;
+                if (this.x < 0 || this.x > canvas.width) this.speedX *= -1;
+                if (this.y < 0 || this.y > canvas.height) this.speedY *= -1;
+                if(Math.random() > 0.98) this.glitch = 10;
+                if(this.glitch > 0) this.glitch--;
+            }
+            draw() {
+                ctx.save(); ctx.globalAlpha = this.alpha; ctx.fillStyle = this.color;
+                let gx = this.glitch > 0 ? (Math.random()-0.5)*20 : 0;
+                ctx.fillRect(this.x + gx, this.y, this.size, this.size); ctx.restore();
+            }
+        }
+        function animate() { ctx.clearRect(0, 0, canvas.width, canvas.height); particles.forEach(p => { p.update(); p.draw(); }); requestAnimationFrame(animate); }
+        window.addEventListener('resize', initCanvas);
+        initCanvas(); for(let i=0; i<60; i++) particles.push(new Particle()); animate();
+
+        // --- 逻辑部分 ---
+        let globalData = [];
+        const PAGE_CAPACITY = 60; 
+        const COL_CAPACITY = 30;
+
+        window.onload = function() {
+            document.getElementById('baiduAppId').value = localStorage.getItem('baidu_appid') || '';
+            document.getElementById('baiduKey').value = localStorage.getItem('baidu_key') || '';
+        }
+
+        // --- JSONP 直连百度核心技术 ---
+        function fetchBaiduJSONP(word, appid, key) {
+            return new Promise((resolve) => {
+                const salt = Date.now();
+                const sign = SparkMD5.hash(appid + word + salt + key);
+                const callbackName = 'baidu_cb_' + Math.floor(Math.random() * 100000);
+                
+                window[callbackName] = (data) => {
+                    delete window[callbackName];
+                    const scriptTag = document.getElementById(callbackName);
+                    if (scriptTag) document.body.removeChild(scriptTag);
+                    
+                    if (data.trans_result && data.trans_result.length > 0) {
+                        resolve(data.trans_result[0].dst);
+                    } else {
+                        resolve(data.error_code ? `Error:${data.error_code}` : "Not Found");
+                    }
+                };
+
+                const script = document.createElement('script');
+                script.id = callbackName;
+                script.src = `https://api.fanyi.baidu.com/api/trans/vip/translate?q=${encodeURIComponent(word)}&from=en&to=zh&appid=${appid}&salt=${salt}&sign=${sign}&callback=${callbackName}`;
+                document.body.appendChild(script);
+
+                setTimeout(() => {
+                    if (window[callbackName]) {
+                        delete window[callbackName];
+                        const s = document.getElementById(callbackName);
+                        if(s) document.body.removeChild(s);
+                        resolve("Timeout");
+                    }
+                }, 3500);
+            });
+        }
+
+        async function fetchYoudaoScraper(word) {
+            const url = `https://corsproxy.io/?` + encodeURIComponent(`https://dict.youdao.com/suggest?num=1&doctype=json&q=${word}`);
+            try {
+                const res = await fetch(url);
+                const json = await res.json();
+                return json.data?.entries?.[0]?.explain || "Not Found";
+            } catch (e) { return "Network Error"; }
+        }
+
+        async function startGeneration() {
+            const appId = document.getElementById('baiduAppId').value.trim();
+            const key = document.getElementById('baiduKey').value.trim();
+            localStorage.setItem('baidu_appid', appId);
+            localStorage.setItem('baidu_key', key);
+
+            const input = document.getElementById('wordInput').value;
+            const lines = input.split('\n').map(l => l.trim()).filter(l => l);
+            const isHide = document.getElementById('hideMode').checked;
+
+            if (lines.length === 0) return alert("Please enter words!");
+            document.getElementById('btnGen').disabled = true;
+            document.getElementById('statusLog').innerText = "Initiating Spider-Sense...";
+            globalData = [];
+
+            const useBaidu = (appId && key);
+            const delay = useBaidu ? 1200 : 300; // 百度接口限速 1.2s 一次以保万无一失
+
+            for (let i = 0; i < lines.length; i++) {
+                document.getElementById('progBar').style.width = ((i+1)/lines.length*100) + '%';
+                document.getElementById('statusLog').innerText = `Tracing [${i+1}/${lines.length}]: ${lines[i]}`;
+                
+                let def = useBaidu ? await fetchBaiduJSONP(lines[i], appId, key) : await fetchYoudaoScraper(lines[i]);
+                globalData.push({ idx: i+1, word: lines[i], def: def });
+                await new Promise(r => setTimeout(r, delay)); 
+            }
+
+            renderPages(isHide);
+            document.getElementById('btnGen').disabled = false;
+            document.getElementById('btnExcel').disabled = false;
+            document.getElementById('btnPdf').disabled = false;
+            document.getElementById('statusLog').innerHTML = `<span style="color:#00ff00">MISSION ACCOMPLISHED!</span>`;
+        }
+
+        function renderPages(isHide) {
+            const output = document.getElementById('output');
+            output.innerHTML = "";
+            const totalPages = Math.ceil(globalData.length / PAGE_CAPACITY);
+            for (let p = 0; p < totalPages; p++) {
+                const pageData = globalData.slice(p * PAGE_CAPACITY, (p + 1) * PAGE_CAPACITY);
+                const div = document.createElement('div'); div.className = 'paper-preview';
+                div.innerHTML = `<div class="a4-header">SPIDER-VARSITY: VOCAB LIST - PAGE ${p+1}</div>
+                    <div class="a4-body">
+                        <div class="column">${buildTable(pageData.slice(0, COL_CAPACITY), isHide)}</div>
+                        <div class="column">${buildTable(pageData.slice(COL_CAPACITY, PAGE_CAPACITY), isHide)}</div>
+                    </div>`;
+                output.appendChild(div);
+            }
+        }
+
+        function buildTable(data, isHide) {
+            let html = `<table><thead><tr><th class="col-idx">#</th><th class="col-word">${isHide?'Fill In':'Word'}</th><th class="col-def">Def</th><th class="col-chk">Check</th></tr></thead><tbody>`;
+            for(let i=0; i<COL_CAPACITY; i++) {
+                const item = data[i];
+                html += item ? `<tr><td align="center">${item.idx}</td><td><b>${isHide?'':item.word}</b></td><td>${item.def}</td><td></td></tr>` : `<tr><td>&nbsp;</td><td></td><td></td><td></td></tr>`;
+            }
+            return html + `</tbody></table>`;
+        }
+
+        function downloadPDF() { html2pdf().from(document.getElementById('output')).set({ margin:0, filename:'Spider_Vocab.pdf', html2canvas:{scale:2}, jsPDF:{unit:'mm', format:'a4'} }).save(); }
+        function exportExcel() { XLSX.writeFile(XLSX.utils.book_append_sheet(XLSX.utils.book_new(), XLSX.utils.json_to_sheet(globalData), "Words"), "Spider_Words.xlsx"); }
+    </script>
+</body>
+</html>
